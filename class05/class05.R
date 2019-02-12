@@ -2,6 +2,7 @@
 #' title: "Lecture 5 work"
 #' author: "Nada Boutros"
 #' date: "January 24,2019"
+#' output: github_document
 #' ---
 
 # Class 05 R graphics intro
