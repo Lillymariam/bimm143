@@ -1,0 +1,197 @@
+---
+title: "Class 15: Trancriptomics and the analysis of RNA-Seq data"
+output: github_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+```{r}
+# For this class, you'll also need DESeq2:
+#biocLite("DESeq2")
+```
+
+## Import countData and colData into R
+```{r}
+counts <- read.csv("data/airway_scaledcounts.csv", stringsAsFactors = FALSE)
+metadata <- read.csv("data/airway_metadata.csv", stringsAsFactors = FALSE)
+```
+
+```{r}
+head(counts)
+```
+
+```{r}
+head(metadata)
+```
+
+```{r}
+colnames(counts)
+```
+
+```{r}
+metadata$id
+```
+
+```{r}
+colnames(counts[-1]) == metadata$id
+all(colnames(counts[-1])== metadata$id)
+```
+first task to find which columns in **counts** correspond to the control conditions (i.e. no drug!). Then we can calculate the mean count value for each gene.
+```{r}
+control.inds <- metadata$dex == "control"
+
+control.ids <- metadata$id [control.inds]
+control.ids
+head(counts[,control.ids])
+```
+
+```{r}
+control.mean <- rowSums(counts[,control.ids])/ncol(counts[,control.ids])
+names(control.mean) <- counts$ensgene
+head(control.mean)
+```
+
+Now do the same thing for the drug treated samples (i.e *treated* columns)
+```{r}
+treated <- metadata[metadata[,"dex"]=="treated",]
+treated.mean <- rowSums( counts[ ,treated$id] )/ncol(counts[,treated$id]) 
+names(treated.mean) <- counts$ensgene
+head(treated.mean)
+```
+
+Combine the mean count values for control and treated into a new data.frame called meancounts!
+```{r}
+meancounts <- data.frame(control.mean, treated.mean)
+```
+
+```{r}
+colSums(meancounts)
+```
+
+Now we can plot the drug treated vs non-drug control count values
+```{r}
+plot(meancounts$control.mean, meancounts$treated.mean)
+```
+
+```{r}
+#?plot.default
+```
+
+```{r}
+plot(meancounts$control.mean, meancounts$treated.mean, log = "xy")
+```
+
+We can find candidate differentially expressed genes by looking for genes with a large change between control and dex-treated samples. We usually look at the log2 of the fold change, because this has better mathematical properties.
+
+Here we calculate log2foldchange, add it to our meancounts data.frame and inspect the results either with the head() or the View() function for example.
+
+```{r}
+meancounts$log2fc <- log2(meancounts[,"treated.mean"]/meancounts[,"control.mean"])
+head(meancounts)
+```
+
+There are a couple of “weird” results. Namely, the NaN (“not a number””) and -Inf (negative infinity) results.
+
+The NaN is returned when you divide by zero and try to take the log. The -Inf is returned when you try to take the log of zero. It turns out that there are a lot of genes with zero expression. Let’s filter our data to remove these genes. Again inspect your result (and the intermediate steps) to see if things make sense to you
+
+removing the zero entry genes from meancounts
+```{r}
+zero.vals <- which(meancounts[,1:2]==0, arr.ind=TRUE)
+
+to.rm <- unique(zero.vals[,1])
+mycounts <- meancounts[-to.rm,]
+head(mycounts)
+```
+
+A common threshold used for calling something differentially expressed is a log2(FoldChange) of greater than 2 or less than -2. Let’s filter the dataset both ways to see how many genes are up or down-regulated.
+```{r}
+up.ind <- mycounts$log2fc > 2
+down.ind <- mycounts$log2fc <(-2)
+```
+
+```{r}
+sum(up.ind)
+sum(down.ind)
+```
+
+There are `sum(up.ind)` up regulated genes and `sum(down.ind)`down regulated genes.
+
+```{r}
+head(mycounts[up.ind,])
+```
+
+#Adding annotations
+
+Use the **merge** function to add annotation data from ensemble
+
+```{r}
+anno <- read.csv("data/annotables_grch38.csv")
+head(anno)
+```
+
+```{r}
+#?merge
+```
+
+```{r}
+mycounts.annotated <- merge(x=mycounts, y=anno, by.x = "row.names", by.y = "ensgene")
+head(mycounts.annotated)
+```
+
+#DESeq2 analysis
+
+```{r}
+library(DESeq2)
+citation("DESeq2")
+```
+
+```{r}
+dds <- DESeqDataSetFromMatrix(countData=counts, 
+                              colData=metadata, 
+                              design=~dex, 
+                              tidy=TRUE)
+dds
+```
+
+```{r}
+#?DESeqDataSetFromMatrix
+```
+
+```{r}
+dds <- DESeq(dds)
+```
+
+```{r}
+res <- results(dds)
+head(res)
+```
+
+```{r}
+summary(res)
+```
+
+```{r}
+res05 <- results(dds, alpha=0.01)
+summary(res05)
+res01 <- results(dds, alpha=0.01)
+summary(res01)
+```
+
+#Volcano Plot
+```{r}
+library(ggplot2)
+```
+
+```{r}
+mycols <- rep("gray", nrow(res01))
+mycols[abs(res01$log2FoldChange)>2]<- "purple" 
+inds <- (res01$padj<0.01)&(abs(res01$log2FoldChange)>2)
+mycols[inds]<-" darkturquoise"
+plot(res01$log2FoldChange, -log(res01$padj), col = mycols, ylab = "-Log(P-value)",xlab = "Log2(FoldChange)")
+abline(v=c(-2,2),col="gray", lty = 2)
+abline(h= -log(0.1), col="gray",lty=2)
+
+```
+
